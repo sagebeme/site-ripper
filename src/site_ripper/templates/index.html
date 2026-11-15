@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Site Ripper</title>
+<style>
+  :root {
+    --bg: #f6f4ef; --card: #fffdf8; --ink: #1d1b16; --muted: #6b665b; --line: #ddd7c9;
+    --accent: #2f5d50; --accent-ink: #fff; --warn: #8a5a00; --bad: #9b2c2c; --ok: #2f5d50;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #17160f; --card: #201f18; --ink: #ece7da; --muted: #a39d8e; --line: #38352b;
+      --accent: #7fb8a4; --accent-ink: #10201b; --warn: #e0b04a; --bad: #e98080; --ok: #7fb8a4;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 760px; margin: 0 auto; padding: 32px 16px 64px; }
+  h1 { font-size: 1.6rem; margin: 0 0 4px; letter-spacing: -0.01em; }
+  .lede { color: var(--muted); margin: 0 0 24px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+          padding: 20px; margin-bottom: 16px; }
+  label { display: block; font-weight: 600; margin-bottom: 6px; }
+  input[type=text], input[type=number] { width: 100%; padding: 10px 12px; font: inherit;
+          color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; }
+  input[type=number] { width: 7em; }
+  .check { display: flex; gap: 8px; align-items: flex-start; font-weight: 400; margin-top: 14px; }
+  .check input { margin-top: 5px; }
+  details { margin-top: 14px; color: var(--muted); }
+  details .row { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 10px; }
+  details label { font-weight: 400; }
+  .buttons { display: flex; gap: 10px; margin-top: 18px; flex-wrap: wrap; }
+  button, .button { font: inherit; font-weight: 600; padding: 9px 18px; border-radius: 6px;
+          border: 1px solid var(--accent); background: var(--accent); color: var(--accent-ink);
+          cursor: pointer; text-decoration: none; display: inline-block; }
+  button.secondary { background: transparent; color: var(--accent); }
+  button:disabled { opacity: 0.45; cursor: default; }
+  .rules { font-size: 0.9rem; color: var(--muted); }
+  .rules ul { margin: 6px 0 0; padding-left: 20px; }
+  #message { min-height: 1.5em; font-weight: 600; }
+  #message.bad { color: var(--bad); }
+  progress { width: 100%; height: 10px; accent-color: var(--accent); }
+  #log { list-style: none; margin: 12px 0 0; padding: 0; max-height: 340px; overflow: auto;
+         font: 13px/1.6 ui-monospace, "SF Mono", Menlo, monospace; }
+  #log li { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #log .skipped { color: var(--warn); }
+  table { width: 100%; border-collapse: collapse; font-size: 0.92rem; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+  td.size { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  td.name { word-break: break-all; }
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Site Ripper</h1>
+  <p class="lede">Paste a website or a public cloud bucket link and get an offline copy.</p>
+
+  <form id="form" class="card">
+    <label for="url">Link</label>
+    <input id="url" type="text" placeholder="https://example.com/docs/  or  https://bucket.s3.amazonaws.com/" required>
+    <label class="check"><input id="agree" type="checkbox">
+      <span>I have the right to copy this: it's mine, openly licensed, or the owner said yes.</span></label>
+    <details>
+      <summary>Limits</summary>
+      <div class="row">
+        <label>Pages (max 1000)<br><input id="max_pages" type="number" value="200" min="1" max="1000"></label>
+        <label>Depth (clicks)<br><input id="depth" type="number" value="3" min="0" max="10"></label>
+      </div>
+      <label class="check"><input id="whole_host" type="checkbox"><span>Copy the whole site, not just the folder I pasted</span></label>
+      <label class="check"><input id="s3" type="checkbox"><span>This is an S3-compatible bucket on another host (MinIO etc.)</span></label>
+    </details>
+    <div class="buttons">
+      <button id="start" type="submit">Start</button>
+      <button id="stop" type="button" class="secondary" disabled>Stop</button>
+    </div>
+    <div class="rules">
+      <p>Always on: obeys robots.txt, waits 1 second between requests, says honestly who it is,
+      never logs in or gets around paywalls or CAPTCHAs.</p>
+    </div>
+  </form>
+
+  <section id="bucket" class="card hidden">
+    <h2 id="bucket-title" style="margin-top:0;font-size:1.1rem"></h2>
+    <p class="rules">An open bucket isn't always open on purpose. If it looks like private data, don't download it; tell the owner.</p>
+    <label class="check"><input id="select-all" type="checkbox"><span>Select all</span></label>
+    <table><thead><tr><th></th><th>File</th><th>Size</th></tr></thead><tbody id="files"></tbody></table>
+    <div class="buttons"><button id="download" type="button">Download ticked files</button></div>
+  </section>
+
+  <section id="progress-card" class="card hidden">
+    <p id="message"></p>
+    <progress id="bar" max="1" value="0"></progress>
+    <div class="buttons hidden" id="done"><a class="button" href="/api/zip">Download zip</a></div>
+    <ul id="log"></ul>
+  </section>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const post = (path, body) => fetch(path, {
+  method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body || {}),
+}).then(async (r) => ({ok: r.ok, data: await r.json()}));
+const mb = (bytes) => (bytes / 1048576).toFixed(2) + " MB";
+
+function say(text, bad) {
+  $("progress-card").classList.remove("hidden");
+  $("message").textContent = text;
+  $("message").className = bad ? "bad" : "";
+}
+
+function busy(on) {
+  $("start").disabled = on; $("download").disabled = on; $("stop").disabled = !on;
+}
+
+function addLog(text, cls) {
+  const li = document.createElement("li");
+  li.textContent = text; li.title = text; if (cls) li.className = cls;
+  $("log").prepend(li);
+  while ($("log").children.length > 500) $("log").lastChild.remove();
+}
+
+function watch(total) {
+  busy(true);
+  $("done").classList.add("hidden");
+  $("log").replaceChildren();
+  $("bar").max = total; $("bar").value = 0;
+  let saved = 0;
+  const source = new EventSource("/api/events");
+  source.onmessage = (msg) => {
+    const e = JSON.parse(msg.data);
+    if (e.type === "saved") {
+      saved += 1;
+      $("bar").value = e.pages ?? saved;
+      say(`Saved ${saved} files…`);
+      addLog(`saved    ${e.url}`);
+    } else if (e.type === "skipped") {
+      addLog(`skipped  ${e.url}  (${e.reason})`, "skipped");
+    } else if (e.type === "finished") {
+      source.close(); busy(false);
+      $("bar").value = $("bar").max;
+      say(`Done: ${e.saved} files saved (${e.megabytes} MB), ${e.skipped} skipped. Stopped because: ${e.reason}.`);
+      e.warnings.forEach((w) => addLog(`warning  ${w}`, "skipped"));
+      $("done").classList.remove("hidden");
+    } else if (e.type === "error") {
+      source.close(); busy(false); say(e.message, true);
+    }
+  };
+}
+
+function showBucket(data) {
+  $("bucket").classList.remove("hidden");
+  $("bucket-title").textContent =
+    `${data.provider} bucket "${data.name}": ${data.files.length} files` + (data.more ? " (list cut short)" : "");
+  const rows = data.files.map((f) => {
+    const tr = document.createElement("tr");
+    const box = document.createElement("input");
+    box.type = "checkbox"; box.value = f.key;
+    const cells = [box, f.key, mb(f.size)].map((c, i) => {
+      const td = document.createElement("td");
+      if (i === 0) td.append(c); else td.textContent = c;
+      td.className = ["", "name", "size"][i];
+      return td;
+    });
+    tr.append(...cells);
+    return tr;
+  });
+  $("files").replaceChildren(...rows);
+  $("select-all").checked = false;
+}
+
+$("form").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  $("bucket").classList.add("hidden");
+  const {ok, data} = await post("/api/start", {
+    url: $("url").value, agree: $("agree").checked, max_pages: +$("max_pages").value,
+    depth: +$("depth").value, whole_host: $("whole_host").checked, s3: $("s3").checked,
+  });
+  if (!ok) return say(data.error, true);
+  if (data.mode === "bucket") { say("Tick the files you want, then press Download."); showBucket(data); return; }
+  say("Starting…"); watch(+$("max_pages").value);
+});
+
+$("select-all").addEventListener("change", () =>
+  $("files").querySelectorAll("input").forEach((b) => (b.checked = $("select-all").checked)));
+
+$("download").addEventListener("click", async () => {
+  const keys = [...$("files").querySelectorAll("input:checked")].map((b) => b.value);
+  const {ok, data} = await post("/api/bucket/download", {keys});
+  if (!ok) return say(data.error, true);
+  say(`Downloading ${data.count} files…`); watch(data.count);
+});
+
+$("stop").addEventListener("click", () => post("/api/stop"));
+</script>
+</body>
+</html>
