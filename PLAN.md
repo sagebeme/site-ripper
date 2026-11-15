@@ -111,6 +111,8 @@ This only works when the bucket's owner has chosen to make the list public. Many
 
 How it lists: one plain web request per page of results (S3 and S3-compatible: `?list-type=2`; Google: its JSON list address; Azure: `?restype=container&comp=list`). Big buckets come back in pages of up to 1,000 files; the tool follows them politely, with the same delay, and stops at the file-count cap.
 
+**Tested by hand (2026-11-16):** `https://freebies.s3.amazonaws.com/?list-type=2` returned the public list (11 files, one page, `IsTruncated=false`). `TripleYourIncome.pdf` then downloaded at 419,908 bytes, matching the listed `Size`, and its MD5 matched the listed `ETag`. So for S3, the tool can check each download against the list. (For files uploaded in several parts, the ETag isn't a plain MD5; then it checks size only.)
+
 **Bucket rules (same spirit as the site rules):**
 
 - Only the exact bucket link you paste. No guessing bucket names, no scanning for open buckets.
@@ -175,6 +177,6 @@ Each step is its own commit on a `feat/` branch.
 
 1. Are the default caps (200 pages, depth 3, 1 s delay, 25 MB per file) sensible for what you want to copy?
 2. Do you want the command-line version too, or only the web page?
-3. Please share a public bucket link (or a file in one) we can test with, ideally one from each provider you care most about.
+3. Amazon S3 is tested (see above). Links for Google Cloud, Azure or Backblaze buckets would let us test those too.
 
 Decided: Python, running on your own computer for v1 (see "Why Python" above).
