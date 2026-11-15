@@ -2,6 +2,8 @@
 
 Paste a link, get an offline copy of that website: its pages, CSS, JavaScript, images and fonts, with links fixed so the copy works without internet. Saved as a folder and a `.zip`.
 
+You can also paste a public cloud storage bucket link (Amazon S3, Google Cloud Storage, Azure Blob, Backblaze B2, or another S3-compatible service). The tool lists its files so you can pick which ones to download.
+
 **Status:** planning. Nothing to install yet. The full plan is in [PLAN.md](PLAN.md).
 
 ## Polite by default

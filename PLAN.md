@@ -33,7 +33,13 @@ These are defaults the tool always applies. There is no switch to turn them off.
 - **Flask**: a tiny local web page with a text box and a progress list. Runs only on your own computer (`127.0.0.1`), never on the internet.
 - **Tooling**: `uv` to install things, Ruff for lint/format, mypy for type checks, pytest for tests.
 
-That's four outside packages. No database, no browser engine.
+That's four outside packages. No database, no browser engine. Bucket listing needs no extra package: the list answers are plain XML or JSON, which Python reads with what it already has.
+
+### Why Python and not JavaScript, and where it runs
+
+- **It can't be a website that runs only in the browser.** Browsers block a page from downloading files from other sites unless those sites allow it (a safety rule called CORS). Almost no site does, so the downloading has to happen in a program on a computer, not in a browser tab. Python or Node.js could both do that; Python is simpler to read and has the best HTML tools.
+- **v1 runs on your own computer.** You start it with one command and open `http://127.0.0.1:5000`. Nothing to host, no cost, and your downloads land straight on your disk.
+- **Hosting later (optional).** The same Python app can run on Render (where your n8n already runs). But a public copy means strangers could use your server to download any site, so that version would need a password, a smaller cap, and auto-deleting of old zips. That is a separate step after v1 works.
 
 ## How it is laid out
 
@@ -44,6 +50,7 @@ site-ripper/
     fetcher.py     # downloads one URL politely (delay, robots, name, size cap)
     rewriter.py    # finds links in HTML/CSS and changes them to local paths
     paths.py       # turns a URL into a safe file path on disk
+    buckets.py     # recognises bucket links, lists their files, downloads picked ones
     packager.py    # makes the zip
     cli.py         # `site-ripper https://example.com`
     web.py         # the Flask page
@@ -78,6 +85,38 @@ site-ripper/
   - Odd characters are made safe and paths can never climb out of the output folder (`..` is blocked).
 - **Rewriting:** every link to something we saved becomes a *relative* path (like `../css/site.css`) so the copy works from any folder and from inside the zip. Links to things we didn't save (other sites, forbidden pages) are left pointing at the live web, and get a small note in the report.
 - **Not handled in v1:** content that JavaScript builds after the page loads. Many modern sites (single-page apps) will copy as mostly-empty pages. The report will warn when a page looks like this.
+
+## Cloud storage buckets
+
+A "bucket" is a big online folder that a company rents from a cloud provider to hold files. Many sites keep their images and downloads in one. The tool handles buckets in two ways.
+
+### 1. Site files that live in a bucket
+
+When a page loads an image, CSS file, font or download from a bucket (for example `mysite.s3.amazonaws.com/logo.png`), the tool downloads it like any other asset and saves it under `_assets/<bucket host>/`. It only takes files the site's own pages link to.
+
+### 2. Paste a bucket link: list the files, pick what to download
+
+If you paste a link to a bucket instead of a web page, the tool asks the bucket for its list of files and shows them in a table (name, size, date). You tick the files you want, or "select all", and it downloads them into the output folder and zip.
+
+This only works when the bucket's owner has chosen to make the list public. Many open-data projects do this on purpose (for example the datasets in the AWS Open Data Registry or Google Cloud public datasets).
+
+| Provider | Link shapes the tool recognises | Can it list the files without keys? |
+|---|---|---|
+| Amazon S3 | `bucket.s3.amazonaws.com`, `s3.<region>.amazonaws.com/bucket`, `s3://bucket` | Yes, if the owner allows public listing |
+| Google Cloud Storage | `storage.googleapis.com/bucket`, `bucket.storage.googleapis.com`, `gs://bucket` | Yes, if the owner allows public listing |
+| Microsoft Azure Blob Storage | `account.blob.core.windows.net/container` | Yes, if the container's access level is "container" (public list) |
+| Cloudflare R2 | `pub-….r2.dev/…` or a custom domain | **No.** R2's public links serve files but never a list. Files linked from a site still download (way 1). |
+| Backblaze B2 | `f00X.backblazeb2.com/file/bucket/…`, `s3.<region>.backblazeb2.com/bucket` | Needs testing with a real public bucket |
+| Other S3-compatible (Wasabi, DigitalOcean Spaces, MinIO, etc.) | `bucket.<region>.<provider>.com` or a pasted endpoint | Yes, if the owner allows public listing (they all speak the same "list" language as S3) |
+
+How it lists: one plain web request per page of results (S3 and S3-compatible: `?list-type=2`; Google: its JSON list address; Azure: `?restype=container&comp=list`). Big buckets come back in pages of up to 1,000 files; the tool follows them politely, with the same delay, and stops at the file-count cap.
+
+**Bucket rules (same spirit as the site rules):**
+
+- Only the exact bucket link you paste. No guessing bucket names, no scanning for open buckets.
+- No access keys or logins in v1. If the bucket says "Access Denied", the tool says so and stops. Adding *your own* keys for *your own* buckets could come later.
+- Same caps: 500 MB total and 25 MB per file by default (a "large files" setting can raise the per-file cap up to the 2 GB total ceiling), at most 10,000 files listed.
+- A warning on screen: an open bucket is not always open on purpose. If it looks like private data (backups, customer files, `.env`, passwords), don't download it; tell the owner instead.
 
 ## Output folder and zip
 
@@ -116,7 +155,8 @@ There is also a command-line version: `site-ripper https://example.com --max-pag
 6. `packager.py` + `REPORT.md` + `manifest.json`.
 7. `cli.py`. First end-to-end run against the local fake site.
 8. `web.py` (the Flask page with live progress).
-9. README usage section, then a real test on a site we own or that allows it.
+9. `buckets.py`: recognise bucket links, list files per provider, download the ticked ones. Tests use saved sample list answers, then one real public bucket (your test link).
+10. README usage section, then a real test on a site we own or that allows it.
 
 Each step is its own commit on a `feat/` branch.
 
@@ -133,6 +173,8 @@ Each step is its own commit on a `feat/` branch.
 
 ## Open questions for you
 
-1. Is Python + Flask OK, or would you prefer JavaScript (Node)?
-2. Are the default caps (200 pages, depth 3, 1 s delay) sensible for what you want to copy?
-3. Do you want the command-line version too, or only the web page?
+1. Are the default caps (200 pages, depth 3, 1 s delay, 25 MB per file) sensible for what you want to copy?
+2. Do you want the command-line version too, or only the web page?
+3. Please share a public bucket link (or a file in one) we can test with, ideally one from each provider you care most about.
+
+Decided: Python, running on your own computer for v1 (see "Why Python" above).
