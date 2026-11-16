@@ -1,6 +1,6 @@
 # Site Ripper: build plan
 
-**Status: plan only. No code yet. Waiting for approval.**
+**Status: approved and built (v0.1). This file keeps the design and its reasons.**
 
 ## What it does
 
