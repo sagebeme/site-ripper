@@ -70,6 +70,8 @@ def create_app(output_root: Path = Path("output")) -> Flask:
     """Build the Flask app. ``output_root`` is where copies are saved."""
     app = Flask(__name__)
     job = Job()
+    # Flask reads relative file paths from its own code folder, so make it absolute.
+    output_root = output_root.resolve()
 
     @app.before_request
     def only_local() -> None:
